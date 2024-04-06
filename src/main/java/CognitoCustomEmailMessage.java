@@ -24,35 +24,29 @@ public class CognitoCustomEmailMessage {
     private static final String TITLE_RESEND_CODE = "Resend code request";
     private static final String SUBJECT = "Confirmation code";
     public static final String AWS_SES_TEMPLATE = "Confirmation_Code-1705094828937";
+    public static final String EMAIL = "email";
+    public static final String SOURCE = "";
+    public static final String RETURN_PATH = "";
 
     public CognitoUserPoolCustomSenderEvent handleRequest(CognitoUserPoolCustomSenderEvent event,
                                                           Context context) {
         LambdaLogger logger = context.getLogger();
-        logger.log("Trigger Source" + event.getTriggerSource());
+        String triggerSource = event.getTriggerSource();
+        logger.log("Trigger Source" + triggerSource);
 
-        if (event.getTriggerSource().equals("CustomEmailSender_SignUp")) {
-            if (event.getRequest().getCode() != null) {
-                String code = event.getRequest().getCode();
+        String code = event.getRequest().getCode();
+        if (triggerSource.equals("CustomEmailSender_SignUp")) {
+            if (code != null) {
                 sendEmail(event, SUBJECT, code, TITLE_SIGN_UP);
             }
-        } else if (event.getTriggerSource().equals("CustomEmailSender_ResendCode")) {
-            if (event.getRequest().getCode() != null) {
-                String code = event.getRequest().getCode();
+        } else if (triggerSource.equals("CustomEmailSender_ResendCode")) {
+            if (code != null) {
                 sendEmail(event, SUBJECT, code, TITLE_RESEND_CODE);
             }
-        } else if (event.getTriggerSource().equals("CustomEmailSender_ForgotPassword")) {
-            if (event.getRequest().getCode() != null) {
-                String code = event.getRequest().getCode();
+        } else if (triggerSource.equals("CustomEmailSender_ForgotPassword")) {
+            if (code != null) {
                 sendEmail(event, SUBJECT, code, TITLE_FORGOT_PASSWORD);
             }
-        } else if (event.getTriggerSource().equals("CustomEmailSender_UpdateUserAttribute")) {
-
-        } else if (event.getTriggerSource().equals("CustomEmailSender_VerifyUserAttribute")) {
-
-        } else if (event.getTriggerSource().equals("CustomEmailSender_AdminCreateUser")) {
-
-        } else if (event.getTriggerSource().equals("CustomEmailSender_AccountTakeOverNotification")) {
-
         }
         return event;
     }
@@ -89,14 +83,14 @@ public class CognitoCustomEmailMessage {
 
         Destination destination = new Destination()
                 .withToAddresses(event.getRequest()
-                        .getUserAttributes().get("email"));
+                        .getUserAttributes().get(EMAIL));
 
         sendTemplatedEmailRequest.setTemplate(AWS_SES_TEMPLATE);
         sendTemplatedEmailRequest.setTemplateData(String.format("{\"subject\":\"%s\", "
                 + "\"code\":\"%s\", \"title\":\"%s\"}", subject, decryptedCode, title));
         sendTemplatedEmailRequest.setDestination(destination);
-        sendTemplatedEmailRequest.setSource("Art vs War <no-reply@artvswar.gallery>");
-        sendTemplatedEmailRequest.setReturnPath("info@artvswar.gallery");
+        sendTemplatedEmailRequest.setSource(SOURCE);
+        sendTemplatedEmailRequest.setReturnPath(RETURN_PATH);
         AmazonSimpleEmailService amazonSESClient = getAmazonSESClient();
         amazonSESClient.sendTemplatedEmail(sendTemplatedEmailRequest);
     }
