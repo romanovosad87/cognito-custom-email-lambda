@@ -3,14 +3,16 @@ import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.encryptionsdk.AwsCrypto;
 import com.amazonaws.encryptionsdk.CommitmentPolicy;
 import com.amazonaws.encryptionsdk.CryptoResult;
-import com.amazonaws.encryptionsdk.kms.KmsMasterKey;
-import com.amazonaws.encryptionsdk.kms.KmsMasterKeyProvider;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.LambdaLogger;
 import com.amazonaws.services.simpleemail.AmazonSimpleEmailService;
 import com.amazonaws.services.simpleemail.AmazonSimpleEmailServiceClientBuilder;
 import com.amazonaws.services.simpleemail.model.Destination;
 import com.amazonaws.services.simpleemail.model.SendTemplatedEmailRequest;
+import software.amazon.cryptography.materialproviders.IKeyring;
+import software.amazon.cryptography.materialproviders.MaterialProviders;
+import software.amazon.cryptography.materialproviders.model.CreateAwsKmsMultiKeyringInput;
+import software.amazon.cryptography.materialproviders.model.MaterialProvidersConfig;
 import java.util.Base64;
 
 public class CognitoCustomEmailMessage {
@@ -27,6 +29,9 @@ public class CognitoCustomEmailMessage {
     public static final String EMAIL = "email";
     public static final String SOURCE = "";
     public static final String RETURN_PATH = "";
+    public static final String CUSTOM_EMAIL_SENDER_SIGN_UP = "CustomEmailSender_SignUp";
+    public static final String CUSTOM_EMAIL_SENDER_RESEND_CODE = "CustomEmailSender_ResendCode";
+    public static final String CUSTOM_EMAIL_SENDER_FORGOT_PASSWORD = "CustomEmailSender_ForgotPassword";
 
     public CognitoUserPoolCustomSenderEvent handleRequest(CognitoUserPoolCustomSenderEvent event,
                                                           Context context) {
@@ -35,23 +40,17 @@ public class CognitoCustomEmailMessage {
         logger.log("Trigger Source" + triggerSource);
 
         String code = event.getRequest().getCode();
-        if (triggerSource.equals("CustomEmailSender_SignUp")) {
-            if (code != null) {
-                sendEmail(event, SUBJECT, code, TITLE_SIGN_UP);
-            }
-        } else if (triggerSource.equals("CustomEmailSender_ResendCode")) {
-            if (code != null) {
-                sendEmail(event, SUBJECT, code, TITLE_RESEND_CODE);
-            }
-        } else if (triggerSource.equals("CustomEmailSender_ForgotPassword")) {
-            if (code != null) {
-                sendEmail(event, SUBJECT, code, TITLE_FORGOT_PASSWORD);
-            }
+        if (triggerSource.equals(CUSTOM_EMAIL_SENDER_SIGN_UP) && code != null) {
+            sendEmail(event, SUBJECT, code, TITLE_SIGN_UP);
+        } else if (triggerSource.equals(CUSTOM_EMAIL_SENDER_RESEND_CODE) && code != null) {
+            sendEmail(event, SUBJECT, code, TITLE_RESEND_CODE);
+        } else if (triggerSource.equals(CUSTOM_EMAIL_SENDER_FORGOT_PASSWORD) && code != null) {
+            sendEmail(event, SUBJECT, code, TITLE_FORGOT_PASSWORD);
         }
         return event;
     }
 
-    public AmazonSimpleEmailService getAmazonSESClient() {
+    private AmazonSimpleEmailService getAmazonSESClient() {
         final BasicAWSCredentials basicAWSCredentials = new BasicAWSCredentials(ACCESS_KEY_ID,
                 ACCESS_KEY_SECRET);
 
@@ -61,23 +60,31 @@ public class CognitoCustomEmailMessage {
                 .build();
     }
 
-    public String decrypt(String encryptedVerificationCode) {
+    private String decrypt(String encryptedCode) {
         // 1. Instantiate the SDK
         final AwsCrypto crypto = AwsCrypto.builder()
                 .withCommitmentPolicy(CommitmentPolicy.ForbidEncryptAllowDecrypt)
                 .build();
 
-        // 2. Instantiate an AWS KMS master key provider in strict mode using buildStrict().
-        final KmsMasterKeyProvider keyProvider = KmsMasterKeyProvider.builder().buildStrict(KEY_ARN);
+        // 2. Create the AWS KMS keyring.
+        // We create a multi keyring, as this interface creates the KMS client for us automatically.
+        final MaterialProviders materialProviders = MaterialProviders.builder()
+                .MaterialProvidersConfig(MaterialProvidersConfig.builder().build())
+                .build();
+        final CreateAwsKmsMultiKeyringInput keyringInput =
+                CreateAwsKmsMultiKeyringInput.builder().generator(KEY_ARN).build();
+        final IKeyring kmsKeyring = materialProviders.CreateAwsKmsMultiKeyring(keyringInput);
 
         // 3. Decrypt the data
-        final CryptoResult<byte[], KmsMasterKey> decryptResult = crypto.decryptData(keyProvider,
-                Base64.getDecoder().decode(encryptedVerificationCode));
+        final CryptoResult<byte[], ?> decryptResult =
+                crypto.decryptData(
+                        kmsKeyring, Base64.getDecoder().decode(encryptedCode));
         byte[] result = decryptResult.getResult();
         return new String(result);
     }
 
-    public void sendEmail(CognitoUserPoolCustomSenderEvent event, String subject, String code, String title) {
+    private void sendEmail(CognitoUserPoolCustomSenderEvent event, String subject, String code,
+                          String title) {
         SendTemplatedEmailRequest sendTemplatedEmailRequest = new SendTemplatedEmailRequest();
         String decryptedCode = decrypt(code);
 
